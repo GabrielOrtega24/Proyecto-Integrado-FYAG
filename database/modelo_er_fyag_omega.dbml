@@ -1,0 +1,424 @@
+// ============================================================================
+// MODELO ENTIDAD-RELACIÓN FORMAL (3FN — NOTACIÓN PATA DE GALLO)
+// Proyecto [Omega] — Plataforma Integrada LOMT (FYAG)
+// Motor: PostgreSQL 16 (24 Tablas + Soporte Híbrido JSONB)
+// Instrucciones: Pegar completo en https://dbdiagram.io/d para exportar
+// la Figura 4.1 en PNG/PDF de alta resolución con líneas y patas de gallo.
+// ============================================================================
+
+Project Proyecto_Omega_FYAG {
+  database_type: 'PostgreSQL'
+  Note: 'Plataforma Integrada LOMT (ERP Web + PWA Móvil) — Frío y Agroindustria SpA (FYAG)'
+}
+
+// ----------------------------------------------------------------------------
+// DOMINIO 1: SEGURIDAD, AUTENTICACIÓN RBAC Y AUDITORÍA INMUTABLE
+// ----------------------------------------------------------------------------
+TableGroup "1. Seguridad y Auditoría" [color: #1B2A4A] {
+  roles
+  usuarios
+  bitacora_auditoria
+}
+
+Table roles {
+  id_rol serial [pk, increment]
+  nombre_rol varchar(50) [not null, unique]
+  descripcion varchar(200)
+  permisos_rbac_json jsonb [not null]
+  nivel_acceso smallint [not null]
+  activo boolean [not null, default: true]
+}
+
+Table usuarios {
+  id_usuario serial [pk, increment]
+  id_rol integer [not null]
+  rut varchar(12) [not null, unique, note: 'Validación Módulo 11']
+  email varchar(120) [not null, unique]
+  nombre_completo varchar(150) [not null]
+  password_hash varchar(255) [not null]
+  intentos_fallidos smallint [not null, default: 0]
+  bloqueado_hasta timestamptz
+  ultimo_acceso timestamptz
+  activo boolean [not null, default: true]
+  creado_en timestamptz [not null]
+}
+
+Table bitacora_auditoria {
+  id_bitacora bigserial [pk, increment]
+  id_usuario integer
+  fecha_hora timestamptz [not null]
+  entidad_afectada varchar(60) [not null]
+  id_registro_afectado varchar(60) [not null]
+  accion varchar(30) [not null]
+  valor_anterior_json jsonb [note: 'Índice GIN']
+  valor_nuevo_json jsonb [not null, note: 'Índice GIN']
+  motivo text [not null]
+  ip_origen inet
+}
+
+// ----------------------------------------------------------------------------
+// DOMINIO 2: MAESTROS COMERCIALES, CATÁLOGO Y ABASTECIMIENTO
+// ----------------------------------------------------------------------------
+TableGroup "2. Maestros y Compras" [color: #0F766E] {
+  proveedores
+  clientes
+  contactos
+  categorias
+  articulos
+  documentos_compra
+  lineas_compra
+  historial_precios_compra
+  presupuestos
+}
+
+Table proveedores {
+  id_proveedor serial [pk, increment]
+  rut varchar(12) [not null, unique]
+  razon_social varchar(150) [not null]
+  giro varchar(120) [not null]
+  direccion varchar(200) [not null]
+  region varchar(80) [not null]
+  comuna varchar(80) [not null]
+  ciudad varchar(80) [not null]
+  telefono varchar(30)
+  banco varchar(80)
+  tipo_cuenta varchar(40)
+  numero_cuenta varchar(50)
+  email_pagos varchar(120)
+  plazo_credito_dias smallint [not null, default: 30]
+  activo boolean [not null, default: true]
+}
+
+Table clientes {
+  id_cliente serial [pk, increment]
+  rut varchar(12) [not null, unique]
+  razon_social varchar(150) [not null]
+  giro varchar(120) [not null]
+  direccion varchar(200) [not null]
+  region varchar(80) [not null]
+  comuna varchar(80) [not null]
+  ciudad varchar(80) [not null]
+  representante_legal_nombre varchar(150) [not null]
+  representante_legal_rut varchar(12) [not null]
+  activo boolean [not null, default: true]
+}
+
+Table contactos {
+  id_contacto serial [pk, increment]
+  id_cliente integer
+  id_proveedor integer
+  tipo_contacto varchar(40) [not null, note: 'COMERCIAL|PROYECTOS|FINANZAS|OTRO']
+  nombre_contacto varchar(120) [not null]
+  rut_contacto varchar(12)
+  cargo varchar(80) [not null]
+  email varchar(120) [not null]
+  telefono varchar(30)
+  es_principal boolean [not null, default: false]
+  activo boolean [not null, default: true]
+}
+
+Table categorias {
+  id_categoria serial [pk, increment]
+  nombre varchar(80) [not null, unique]
+  codigo_prefijo varchar(10) [not null, unique]
+  descripcion varchar(200)
+  activo boolean [not null, default: true]
+}
+
+Table articulos {
+  id_articulo serial [pk, increment]
+  id_categoria integer [not null]
+  codigo_sku varchar(50) [not null, unique]
+  codigo_barras varchar(80) [unique]
+  nombre varchar(150) [not null]
+  unidad_medida varchar(20) [not null]
+  sector_bodega varchar(40) [not null]
+  ubicacion_bodega varchar(60) [not null]
+  stock_fisico numeric(12,2) [not null, default: 0]
+  stock_comprometido numeric(12,2) [not null, default: 0]
+  stock_minimo_critico numeric(12,2) [not null, default: 1]
+  ultimo_costo_compra numeric(12,2) [not null, default: 0]
+  costo_promedio_pmp numeric(12,2) [not null, default: 0]
+  precio_lista numeric(12,2) [not null, default: 0]
+  fecha_ultima_actualizacion_precio timestamptz
+  activo boolean [not null, default: true]
+}
+
+Table documentos_compra {
+  id_documento_compra serial [pk, increment]
+  id_proveedor integer [not null]
+  id_usuario_creador integer [not null]
+  id_documento_referencia integer [note: 'Referencia para Nota de Crédito']
+  tipo_doc varchar(20) [not null, note: 'FACTURA|BOLETA|GUIA_DESPACHO|NOTA_CREDITO']
+  folio_documento varchar(40) [not null]
+  fecha_emision date [not null]
+  fecha_vencimiento date
+  subtotal_neto numeric(14,2) [not null]
+  descuento_general_pct numeric(5,2) [not null, default: 0]
+  desc_pronto_pago_pct numeric(5,2) [not null, default: 0]
+  monto_neto_final numeric(14,2) [not null]
+  monto_iva_total numeric(14,2) [not null]
+  monto_total numeric(14,2) [not null]
+  estado_documento varchar(20) [not null]
+  estado_pago varchar(20) [not null]
+  reversa_nc_aplicada boolean [not null, default: false]
+
+  indexes {
+    (id_proveedor, tipo_doc, folio_documento) [unique]
+  }
+}
+
+Table lineas_compra {
+  id_linea_compra serial [pk, increment]
+  id_documento_compra integer [not null]
+  id_articulo integer [not null]
+  cantidad numeric(12,2) [not null]
+  precio_unitario_lista numeric(12,2) [not null]
+  desc_1_pct numeric(5,2) [not null, default: 0]
+  desc_2_pct numeric(5,2) [not null, default: 0]
+  desc_3_pct numeric(5,2) [not null, default: 0]
+  costo_unitario_tasado numeric(12,2) [not null]
+  variacion_margen_pct numeric(6,2) [not null, default: 0]
+  subtotal_linea numeric(14,2) [not null]
+}
+
+Table historial_precios_compra {
+  id_historial_precio bigserial [pk, increment]
+  id_articulo integer [not null]
+  id_documento_compra integer [not null]
+  costo_unitario_tasado numeric(12,2) [not null]
+  precio_lista_referencia numeric(12,2) [not null]
+  fecha_actualizacion timestamptz [not null]
+}
+
+Table presupuestos {
+  id_presupuesto serial [pk, increment]
+  id_cliente integer [not null]
+  id_usuario_emisor integer [not null]
+  codigo_presupuesto varchar(30) [not null, unique]
+  fecha_emision date [not null]
+  monto_estimado_neto numeric(14,2) [not null]
+  margen_esperado_pct numeric(5,2) [not null]
+  estado varchar(20) [not null]
+}
+
+// ----------------------------------------------------------------------------
+// DOMINIO 3: GESTIÓN DE OBRAS, FINANZAS Y BODEGA (CARDEX INMUTABLE)
+// ----------------------------------------------------------------------------
+TableGroup "3. Obras, Finanzas y Cardex" [color: #9E1B1E] {
+  obras
+  historial_estados_obra
+  pagos
+  movimientos_cardex
+  reversas_cardex
+  egresos_obra
+  inventarios_fisicos
+  detalles_inventario
+}
+
+Table obras {
+  id_obra serial [pk, increment]
+  id_cliente integer [not null]
+  id_presupuesto integer
+  id_supervisor integer [not null]
+  id_tecnico_responsable integer
+  codigo_obra varchar(30) [not null, unique]
+  nombre_proyecto varchar(150) [not null]
+  ubicacion_planta varchar(200) [not null]
+  tipo_servicio varchar(30) [not null, note: '8 tipos oficiales Anexo C']
+  estado_actual varchar(20) [not null, note: 'EN_PROCESO|FINALIZADA|SUSPENDIDA|CANCELADA']
+  fecha_creacion date [not null]
+  presupuesto_asignado numeric(14,2) [not null]
+  costo_acumulado_real numeric(14,2) [not null]
+  horas_hombre_totales numeric(8,2) [not null]
+}
+
+Table historial_estados_obra {
+  id_historial_estado serial [pk, increment]
+  id_obra integer [not null]
+  id_usuario integer [not null]
+  estado_anterior varchar(20)
+  estado_nuevo varchar(20) [not null]
+  justificacion_cambio text [not null]
+  fecha_transicion timestamptz [not null]
+}
+
+Table pagos {
+  id_pago serial [pk, increment]
+  id_documento_compra integer
+  id_obra integer
+  id_usuario_registro integer [not null]
+  tipo_flujo varchar(20) [not null, note: 'COBRO_CLIENTE|PAGO_PROVEEDOR']
+  monto_pagado numeric(14,2) [not null]
+  fecha_pago date [not null]
+  medio_pago varchar(40) [not null]
+  comprobante_ref varchar(80)
+}
+
+Table movimientos_cardex {
+  id_movimiento bigserial [pk, increment]
+  id_articulo integer [not null]
+  id_usuario integer [not null]
+  id_documento_compra integer
+  id_obra integer
+  tipo_movimiento varchar(25) [not null]
+  fecha_hora timestamptz [not null]
+  cantidad numeric(12,2) [not null]
+  saldo_stock_resultante numeric(12,2) [not null]
+  costo_pmp_momento numeric(12,2) [not null]
+  precio_lista_momento numeric(12,2) [not null]
+}
+
+Table reversas_cardex {
+  id_reversa serial [pk, increment]
+  id_movimiento_orig bigint [not null]
+  id_movimiento_comp bigint [unique]
+  id_usuario_solicitante integer [not null]
+  id_admin_autorizador integer
+  motivo_obligatorio text [not null]
+  estado_reversa varchar(20) [not null]
+  fecha_solicitud timestamptz [not null]
+  fecha_resolucion timestamptz
+}
+
+Table egresos_obra {
+  id_egreso_obra serial [pk, increment]
+  id_obra integer [not null]
+  id_movimiento bigint [not null, unique]
+  id_articulo integer [not null]
+  cantidad_despachada numeric(12,2) [not null]
+  costo_imputado_pmp numeric(14,2) [not null]
+  valor_imputado_lista numeric(14,2) [not null]
+  fecha_despacho timestamptz [not null]
+}
+
+Table inventarios_fisicos {
+  id_inventario serial [pk, increment]
+  id_usuario_bodega integer [not null]
+  fecha_apertura timestamptz [not null]
+  fecha_cierre timestamptz
+  estado varchar(20) [not null, note: 'EN_PROCESO|FINALIZADO']
+  observaciones_auditoria text
+}
+
+Table detalles_inventario {
+  id_detalle_inv serial [pk, increment]
+  id_inventario integer [not null]
+  id_articulo integer [not null]
+  stock_sistema_esperado numeric(12,2) [not null]
+  stock_fisico_contado numeric(12,2) [not null]
+  diferencia_merma numeric(12,2) [not null]
+  ajuste_aplicado boolean [not null, default: false]
+
+  indexes {
+    (id_inventario, id_articulo) [unique]
+  }
+}
+
+// ----------------------------------------------------------------------------
+// DOMINIO 4: OPERACIÓN MÓVIL EN TERRENO (PWA OFFLINE, EVIDENCIAS Y CHECKLISTS)
+// ----------------------------------------------------------------------------
+TableGroup "4. Terreno y PWA Offline" [color: #B45309] {
+  hojas_servicio
+  consumos_material
+  evidencias
+  checklists
+}
+
+Table hojas_servicio {
+  id_hoja_servicio serial [pk, increment]
+  id_obra integer [not null]
+  id_tecnico integer [not null]
+  uuid_offline_pwa uuid [not null, unique]
+  fecha_inicio timestamptz [not null]
+  fecha_termino timestamptz
+  horas_hombre_registradas numeric(6,2) [not null]
+  gps_latitud numeric(9,6)
+  gps_longitud numeric(9,6)
+  sincronizado_offline boolean [not null, default: false]
+}
+
+Table consumos_material {
+  id_consumo serial [pk, increment]
+  id_hoja_servicio integer [not null]
+  id_articulo integer [not null]
+  cantidad_utilizada numeric(12,2) [not null]
+  alerta_discrepancia_stock boolean [not null, default: false]
+  observacion_discrepancia varchar(200)
+}
+
+Table evidencias {
+  id_evidencia serial [pk, increment]
+  id_hoja_servicio integer [not null]
+  tipo_evidencia varchar(25) [not null, note: 'FOTO_WEBP|FIRMA_PNG|PDF_COMPROBANTE']
+  s3_object_key_uri varchar(255) [not null]
+  hash_sha256_integridad char(64) [not null]
+  peso_kb integer [not null]
+  firmante_nombre varchar(120)
+  firmante_rut varchar(12)
+  fecha_subida timestamptz [not null]
+}
+
+Table checklists {
+  id_checklist serial [pk, increment]
+  id_hoja_servicio integer [not null]
+  tipo_equipo_frigorifico varchar(80) [not null]
+  respuestas_botones_json jsonb [not null, note: 'Índice GIN']
+  aprobado_operativo boolean [not null, default: false]
+  fecha_registro timestamptz [not null]
+}
+
+// ============================================================================
+// RELACIONES FORMALES CON CARDINALIDAD PATA DE GALLO (ON DELETE RESTRICT)
+// ============================================================================
+
+// Seguridad y Auditoría
+Ref: usuarios.id_rol > roles.id_rol [delete: restrict, update: cascade]
+Ref: bitacora_auditoria.id_usuario > usuarios.id_usuario [delete: restrict, update: cascade]
+
+// Maestros y Compras
+Ref: contactos.id_cliente > clientes.id_cliente [delete: restrict, update: cascade]
+Ref: contactos.id_proveedor > proveedores.id_proveedor [delete: restrict, update: cascade]
+Ref: articulos.id_categoria > categorias.id_categoria [delete: restrict, update: cascade]
+Ref: documentos_compra.id_proveedor > proveedores.id_proveedor [delete: restrict, update: cascade]
+Ref: documentos_compra.id_usuario_creador > usuarios.id_usuario [delete: restrict, update: cascade]
+Ref: documentos_compra.id_documento_referencia > documentos_compra.id_documento_compra [delete: restrict, update: cascade]
+Ref: lineas_compra.id_documento_compra > documentos_compra.id_documento_compra [delete: restrict, update: cascade]
+Ref: lineas_compra.id_articulo > articulos.id_articulo [delete: restrict, update: cascade]
+Ref: historial_precios_compra.id_articulo > articulos.id_articulo [delete: restrict, update: cascade]
+Ref: historial_precios_compra.id_documento_compra > documentos_compra.id_documento_compra [delete: restrict, update: cascade]
+Ref: presupuestos.id_cliente > clientes.id_cliente [delete: restrict, update: cascade]
+Ref: presupuestos.id_usuario_emisor > usuarios.id_usuario [delete: restrict, update: cascade]
+
+// Obras, Finanzas y Cardex
+Ref: obras.id_cliente > clientes.id_cliente [delete: restrict, update: cascade]
+Ref: obras.id_presupuesto > presupuestos.id_presupuesto [delete: restrict, update: cascade]
+Ref: obras.id_supervisor > usuarios.id_usuario [delete: restrict, update: cascade]
+Ref: obras.id_tecnico_responsable > usuarios.id_usuario [delete: restrict, update: cascade]
+Ref: historial_estados_obra.id_obra > obras.id_obra [delete: restrict, update: cascade]
+Ref: historial_estados_obra.id_usuario > usuarios.id_usuario [delete: restrict, update: cascade]
+Ref: pagos.id_documento_compra > documentos_compra.id_documento_compra [delete: restrict, update: cascade]
+Ref: pagos.id_obra > obras.id_obra [delete: restrict, update: cascade]
+Ref: pagos.id_usuario_registro > usuarios.id_usuario [delete: restrict, update: cascade]
+Ref: movimientos_cardex.id_articulo > articulos.id_articulo [delete: restrict, update: cascade]
+Ref: movimientos_cardex.id_usuario > usuarios.id_usuario [delete: restrict, update: cascade]
+Ref: movimientos_cardex.id_documento_compra > documentos_compra.id_documento_compra [delete: restrict, update: cascade]
+Ref: movimientos_cardex.id_obra > obras.id_obra [delete: restrict, update: cascade]
+Ref: reversas_cardex.id_movimiento_orig > movimientos_cardex.id_movimiento [delete: restrict, update: cascade]
+Ref: reversas_cardex.id_movimiento_comp - movimientos_cardex.id_movimiento [delete: restrict, update: cascade]
+Ref: reversas_cardex.id_usuario_solicitante > usuarios.id_usuario [delete: restrict, update: cascade]
+Ref: reversas_cardex.id_admin_autorizador > usuarios.id_usuario [delete: restrict, update: cascade]
+Ref: egresos_obra.id_obra > obras.id_obra [delete: restrict, update: cascade]
+Ref: egresos_obra.id_movimiento - movimientos_cardex.id_movimiento [delete: restrict, update: cascade]
+Ref: egresos_obra.id_articulo > articulos.id_articulo [delete: restrict, update: cascade]
+Ref: inventarios_fisicos.id_usuario_bodega > usuarios.id_usuario [delete: restrict, update: cascade]
+Ref: detalles_inventario.id_inventario > inventarios_fisicos.id_inventario [delete: restrict, update: cascade]
+Ref: detalles_inventario.id_articulo > articulos.id_articulo [delete: restrict, update: cascade]
+
+// Terreno y PWA Offline
+Ref: hojas_servicio.id_obra > obras.id_obra [delete: restrict, update: cascade]
+Ref: hojas_servicio.id_tecnico > usuarios.id_usuario [delete: restrict, update: cascade]
+Ref: consumos_material.id_hoja_servicio > hojas_servicio.id_hoja_servicio [delete: restrict, update: cascade]
+Ref: consumos_material.id_articulo > articulos.id_articulo [delete: restrict, update: cascade]
+Ref: evidencias.id_hoja_servicio > hojas_servicio.id_hoja_servicio [delete: restrict, update: cascade]
+Ref: checklists.id_hoja_servicio > hojas_servicio.id_hoja_servicio [delete: restrict, update: cascade]
